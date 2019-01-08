@@ -29,6 +29,9 @@ struct cJSON;
 
 using RpcDataHandler = std::function<void (char const* buff, int n)>;
 using RpcNotificationFunction = std::function<void (cJSON const* json)>;
+using RpcMethod = std::function<cJSON* (cJSON const* req)>;
+using RpcMethodMap = std::map< std::string, RpcMethod >;
+
 
 class RpcConnectedClient
 {
@@ -63,9 +66,6 @@ public:
   virtual void init(cJSON const* conf, RpcNotificationFunction const& callback) override;
 
 protected:
-  using RpcMethod = std::function<cJSON* (cJSON const* req)>;
-  using RpcMethodMap = std::map< std::string, RpcMethod >;
-
   void registerMethod(std::string const& name, RpcMethod const& method);
   void notifyAndDelete(cJSON* json);
 
@@ -107,6 +107,18 @@ private:
     RpcServer* m_server;
   };
 
+  struct RpcMethodInfo
+  {
+    RpcMethodInfo() { }
+    RpcMethodInfo(std::string const& service, std::string const& method)
+      : ServiceName(service)
+      , MethodName(method) { }
+    std::string const ServiceName;
+    std::string const MethodName;
+    std::string toString() const;
+    static RpcMethodInfo parseMethod(char const* s);
+  };
+
   friend class IntrospectionService;
 
 public:
@@ -116,10 +128,14 @@ public:
   void run();
   void enqueueAsyncMessage(cJSON const* json);
   void onIncomingMessage(const char* buff, int n);
+  void setLastChanceHandler(RpcMethod const& lastChanceHandler);
 
 private:
   void processIncomingQueue();
   void processRequest(cJSON const* req);
+  cJSON* processJsonRpcRequest(cJSON const* req);
+  cJSON* processNonJsonRpcRequest(cJSON const* req);
+  cJSON* invokeMethod(RpcMethodInfo const& methodInfo, cJSON const* req);
 
 private:
   std::shared_ptr<RpcConnectedClient> m_client;
@@ -129,6 +145,7 @@ private:
   std::condition_variable             m_cond;
   std::map< std::string, std::shared_ptr<RpcService> > m_services;
   cJSON*                              m_config;
+  RpcMethod                           m_last_chance;
 };
 
 #endif
