@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,14 +26,8 @@
 
 #include <cJSON.h>
 
-extern "C"
-{
-  RpcService*
-  NetService_Create()
-  {
-    return new NetService();
-  }
-}
+JSONRPC_SERVICE_DEFINE(net, []{return new NetService();});
+
 
 namespace
 {

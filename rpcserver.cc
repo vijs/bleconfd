@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,13 @@
 #include "rpclogger.h"
 #include "jsonrpc.h"
 
+
 #ifdef WITH_BLUEZ
 #include "bluez/gattServer.h"
 #endif
 
 #include <stdarg.h>
-
-extern "C" RpcService* AppSettings_Create();
-extern "C" RpcService* WiFiService_Create();
-extern "C" RpcService* NetService_Create();
+#include <sys/stat.h>
 
 namespace
 {
@@ -43,6 +41,14 @@ namespace
     cJSON*& m_json;
   };
 
+  bool fileExists(char const* s)
+  {
+    struct stat buf;
+    memset(&buf, 0, sizeof(buf));
+    return stat(s, &buf) == 0;
+  }
+
+  std::map< std::string, RpcServiceConstructor > serviceConstructors;
 }
 
 std::string
@@ -80,16 +86,25 @@ RpcListener::create()
   );
 }
 
-std::vector< std::shared_ptr<RpcService> >
-services()
+RpcService*
+RpcService::createServiceByName(std::string const& name)
 {
-  std::vector< std::shared_ptr<RpcService> > services
-  {
-    std::shared_ptr<RpcService>(AppSettings_Create()),
-    std::shared_ptr<RpcService>(WiFiService_Create()),
-    std::shared_ptr<RpcService>(NetService_Create())
-  };
-  return services;
+  RpcService* service = nullptr;
+  auto itr = serviceConstructors.find(name);
+  if (itr != serviceConstructors.end())
+    service = itr->second();
+  return service;
+}
+
+RpcServiceRegistrar::RpcServiceRegistrar(std::string const& name, RpcServiceConstructor const& ctor)
+{
+  RpcService::registerServiceConstructor(name, ctor);
+}
+
+void
+RpcService::registerServiceConstructor(std::string const& name, RpcServiceConstructor const& ctor)
+{
+  serviceConstructors.insert(std::make_pair(name, ctor));
 }
 
 RpcService::RpcService()
@@ -102,12 +117,15 @@ RpcService::~RpcService()
 
 BasicRpcService::BasicRpcService(std::string const& name)
   : RpcService()
+  , m_config(nullptr)
   , m_name(name)
 {
 }
 
 BasicRpcService::~BasicRpcService()
 {
+  if (m_config)
+    cJSON_Delete(m_config);
 }
 
 std::string
@@ -132,9 +150,10 @@ BasicRpcService::registerMethod(std::string const& name, RpcMethod const& method
 }
 
 void
-BasicRpcService::init(cJSON const* UNUSED_PARAM(config), RpcNotificationFunction const& callback)
+BasicRpcService::init(cJSON const* config, RpcNotificationFunction const& callback)
 {
   m_notify = callback;
+  m_config = cJSON_Duplicate(config, true);
 }
 
 void
@@ -180,15 +199,33 @@ BasicRpcService::invokeMethod(std::string const& name, cJSON const* req)
   return res;
 }
 
-RpcServer::RpcServer(cJSON const* config)
+RpcServer::RpcServer(std::string const& configFile, cJSON const* config)
+  : m_config_file(configFile)
+  , m_running(false)
 {
   if (config)
     m_config = cJSON_Duplicate(config, true);
   else
     m_config = nullptr;
 
-  std::shared_ptr<RpcService> s(new IntrospectionService(this));
+  std::shared_ptr<RpcService> s(new RpcSystemService(this));
   registerService(s);
+
+  if (m_config)
+  {
+    cJSON const* services = cJSON_GetObjectItem(config, "services");
+    if (services)
+    {
+      for (int i = 0, n = cJSON_GetArraySize(services); i < n; ++i)
+      {
+        cJSON const* service = cJSON_GetArrayItem(services, i);
+        cJSON const* name = cJSON_GetObjectItem(service, "name");
+        std::shared_ptr<RpcService> s(RpcService::createServiceByName(name->valuestring));
+        if (s)
+          registerService(s);
+      }
+    }
+  }
 
   m_dispatch_thread.reset(new std::thread([this] { this->processIncomingQueue(); }));
 }
@@ -197,6 +234,13 @@ RpcServer::~RpcServer()
 {
   if (m_config)
     cJSON_Delete(m_config);
+
+  {
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_running = false;
+  }
+  m_cond.notify_one();
+  m_dispatch_thread->join();
 }
 
 void
@@ -264,6 +308,7 @@ RpcServer::onIncomingMessage(char const* s, int UNUSED_PARAM(n))
 void
 RpcServer::processIncomingQueue()
 {
+  m_running = true;
   while (true)
   {
     cJSON* req = nullptr;
@@ -271,7 +316,13 @@ RpcServer::processIncomingQueue()
 
     {
       std::unique_lock<std::mutex> guard(m_mutex);
-      m_cond.wait(guard, [this] { return !this->m_incoming_queue.empty(); });
+      m_cond.wait(guard, [this] { return !this->m_incoming_queue.empty() || !this->m_running; });
+
+      if (!m_running)
+      {
+        XLOG_INFO("worker thread got shutdown signal");
+        return;
+      }
 
       if (!m_incoming_queue.empty())
       {
@@ -451,29 +502,49 @@ RpcServer::registerService(std::shared_ptr<RpcService> const& service)
     }
   }
 
+  if (conf == nullptr)
+    XLOG_WARN("service %s is missing configuration", service->name().c_str());
+
   service->init(conf, callback);
 }
 
-RpcServer::IntrospectionService::IntrospectionService(RpcServer* parent)
+RpcServer::RpcSystemService::RpcSystemService(RpcServer* parent)
   : BasicRpcService("rpc")
   , m_server(parent)
 {
 }
 
-RpcServer::IntrospectionService::~IntrospectionService()
+RpcServer::RpcSystemService::~RpcSystemService()
 {
 }
 
 void
-RpcServer::IntrospectionService::init(cJSON const* UNUSED_PARAM(config),
+RpcServer::RpcSystemService::init(cJSON const* UNUSED_PARAM(config),
   RpcNotificationFunction const& UNUSED_PARAM(callback))
 {
+  // openssl genpkey -algorithm Ec -pkeyopt ec_paramgen_curve:P-256 -pkeyopt ec_param_enc:named_curve > /tmp/bootstrap_private.pem
+  // openssl pkey -pubout -in /tmp/bootstrap_private.pem > /tmp/bootstrap_public.pem
+
   registerMethod("list-services", [this](cJSON const* req) -> cJSON* { return this->listServices(req); });
   registerMethod("list-methods", [this](cJSON const* req) -> cJSON* { return this->listMethods(req); });
+  registerMethod("get-server-pubkey", [this](cJSON const* req) -> cJSON* { return this->getServerPublicKey(req); });
+  registerMethod("set-client-pubkey", [this](cJSON const* req) -> cJSON* { return this->setClientPublicKey(req); });
 }
 
 cJSON*
-RpcServer::IntrospectionService::listServices(cJSON const* UNUSED_PARAM(req))
+RpcServer::RpcSystemService::getServerPublicKey(cJSON const* req)
+{
+  return JsonRpc::notImplemented(__FUNCTION__);
+}
+
+cJSON*
+RpcServer::RpcSystemService::setClientPublicKey(cJSON const* req)
+{
+  return JsonRpc::notImplemented(__FUNCTION__);
+}
+
+cJSON*
+RpcServer::RpcSystemService::listServices(cJSON const* UNUSED_PARAM(req))
 {
   cJSON* res = cJSON_CreateObject();
   cJSON* names = cJSON_AddArrayToObject(res, "services");
@@ -485,7 +556,7 @@ RpcServer::IntrospectionService::listServices(cJSON const* UNUSED_PARAM(req))
 }
 
 cJSON*
-RpcServer::IntrospectionService::listMethods(cJSON const* req)
+RpcServer::RpcSystemService::listMethods(cJSON const* req)
 {
   cJSON* res = cJSON_CreateObject();
   cJSON const* service = JsonRpc::search(req, "/params/service", true);
@@ -501,3 +572,17 @@ RpcServer::IntrospectionService::listMethods(cJSON const* req)
   }
   return res;
 }
+
+
+std::string chomp(char const* s)
+{
+  std::string t(s);
+  size_t n = strlen(s);
+  if (s[n - 1] == '\r' || s[n - 1] == '\n')
+    t = std::string(s, n - 1);
+  else
+    t = s;
+  return t;
+}
+
+

@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,19 +26,31 @@
 
 
 struct cJSON;
+class RpcService;
 
 using RpcDataHandler = std::function<void (char const* buff, int n)>;
 using RpcNotificationFunction = std::function<void (cJSON const* json)>;
 using RpcMethod = std::function<cJSON* (cJSON const* req)>;
 using RpcMethodMap = std::map< std::string, RpcMethod >;
+using RpcServiceConstructor = std::function<RpcService* ()>;
 
+struct DeviceInfoProvider
+{
+  std::function< std::string () > GetSystemId;
+  std::function< std::string () > GetModelNumber;
+  std::function< std::string () > GetSerialNumber;
+  std::function< std::string () > GetFirmwareRevision;
+  std::function< std::string () > GetHardwareRevision;
+  std::function< std::string () > GetSoftwareRevision;
+  std::function< std::string () > GetManufacturerName;
+};
 
 class RpcConnectedClient
 {
 public:
   RpcConnectedClient() { }
   virtual ~RpcConnectedClient() { }
-  virtual void init() = 0;
+  virtual void init(DeviceInfoProvider const& deviceInfoProvider) = 0;
   virtual void enqueueForSend(char const* buff, int n) = 0;
   virtual void run() = 0;
   virtual void setDataHandler(RpcDataHandler const& handler) = 0;
@@ -53,7 +65,19 @@ public:
   virtual std::string name() const = 0;
   virtual std::vector<std::string> methodNames() const = 0;
   virtual cJSON* invokeMethod(std::string const& name, cJSON const* req) = 0;
+
+public:
+  static void registerServiceConstructor(std::string const& name, RpcServiceConstructor const& ctor);
+  static RpcService* createServiceByName(std::string const& name);
 };
+
+class RpcServiceRegistrar
+{
+public:
+  RpcServiceRegistrar(std::string const& name, RpcServiceConstructor const& ctor);
+};
+
+#define JSONRPC_SERVICE_DEFINE(NAME, CTOR) static RpcServiceRegistrar __ ## NAME(#NAME, CTOR)
 
 class BasicRpcService : public RpcService
 {
@@ -69,9 +93,12 @@ protected:
   void registerMethod(std::string const& name, RpcMethod const& method);
   void notifyAndDelete(cJSON* json);
 
+protected:
+  cJSON*                  m_config;
+
 private:
-  RpcMethodMap  m_methods;
-  std::string   m_name;
+  RpcMethodMap            m_methods;
+  std::string             m_name;
   RpcNotificationFunction m_notify;
 };
 
@@ -81,7 +108,8 @@ public:
   RpcListener() { }
   virtual ~RpcListener() { }
   virtual void init(cJSON const* conf) = 0;
-  virtual std::shared_ptr<RpcConnectedClient> accept() = 0;
+  virtual std::shared_ptr<RpcConnectedClient>
+    accept(DeviceInfoProvider const& deviceInfoProvider) = 0;
 
 public:
   static std::shared_ptr<RpcListener> create();
@@ -90,19 +118,21 @@ public:
 class RpcServer
 {
 public:
-  RpcServer(cJSON const* conf);
+  RpcServer(std::string const& configFile, cJSON const* config);
   ~RpcServer();
 
 private:
-  class IntrospectionService : public BasicRpcService
+  class RpcSystemService : public BasicRpcService
   {
   public:
-    IntrospectionService(RpcServer* parent);
-    virtual ~IntrospectionService();
+    RpcSystemService(RpcServer* parent);
+    virtual ~RpcSystemService();
     virtual void init(cJSON const* conf, RpcNotificationFunction const& callback) override;
   private:
     cJSON* listServices(cJSON const* req);
     cJSON* listMethods(cJSON const* req);
+    cJSON* getServerPublicKey(cJSON const* req);
+    cJSON* setClientPublicKey(cJSON const* req);
   private:
     RpcServer* m_server;
   };
@@ -119,7 +149,7 @@ private:
     static RpcMethodInfo parseMethod(char const* s);
   };
 
-  friend class IntrospectionService;
+  friend class RpcSystemService;
 
 public:
   void setClient(std::shared_ptr<RpcConnectedClient> const& tport);
@@ -145,7 +175,12 @@ private:
   std::condition_variable             m_cond;
   std::map< std::string, std::shared_ptr<RpcService> > m_services;
   cJSON*                              m_config;
+  std::string                         m_config_file;
   RpcMethod                           m_last_chance;
+  bool                                m_running;
 };
+
+// not sure where to put these
+std::string chomp(char const* s);
 
 #endif

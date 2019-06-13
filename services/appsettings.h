@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,10 +25,16 @@ public:
   AppSettingsService();
   virtual ~AppSettingsService();
   virtual void init(cJSON const* conf, RpcNotificationFunction const& callback) override;
+
 private:
   cJSON* get(cJSON const* req);
   cJSON* set(cJSON const* req);
   cJSON* getStatus(cJSON const* req);
+  cJSON* getKeys(cJSON const* req);
+
+private:
+  cJSON const* getDynamicConfig(char const* s) const;
+
 private:
   std::string m_config_file;
 };

@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 #define __JSON_RPC_H__
 
 #include <cJSON.h>
+#include <string>
 
 class JsonRpc
 {
@@ -39,7 +40,23 @@ public:
     bool          required,
     char const*   defaultValue = nullptr);
 
-  static cJSON const* search(cJSON const* json, char const* name, bool required);
+  static std::string
+  getStringWithExpansion(
+    cJSON const*  json,
+    char const*   name,
+    bool          required,
+    char const*   defaultValue = nullptr,
+    cJSON const*  replacements = nullptr);
+
+  static cJSON const*
+  search(
+    cJSON const*  json,
+    char const*   name,
+    bool          required);
+
+  static cJSON*
+  fromFile(
+    char const* fname);
 };
 
 #endif

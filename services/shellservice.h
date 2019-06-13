@@ -13,22 +13,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-#ifndef __WPA_CONTROL_H__
-#define __WPA_CONTROL_H__
+#ifndef __SHELL_SERVICE_H__
+#define __SHELL_SERVICE_H__
 
 #include "../defs.h"
 #include "../rpcserver.h"
 
-class WiFiService : public BasicRpcService
+class ShellService : public BasicRpcService
 {
 public:
-  WiFiService();
-  virtual ~WiFiService();
+  ShellService();
+  virtual ~ShellService();
   virtual void init(cJSON const* conf, RpcNotificationFunction const& callback) override;
 private:
-  cJSON* getStatus(cJSON const* req);
-  cJSON* connect(cJSON const* req);
-  cJSON* scan(cJSON const* req);
+  cJSON* executeCommand(cJSON const* req);
+  cJSON*  m_commands;
 };
 
 #endif

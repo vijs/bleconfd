@@ -17,9 +17,35 @@
     {
       "name": "config",
       "settings":{
-        "db-file": "bleconfd.ini"
+        "db-file": "bleconfd.ini",
+        "dynamic_properties": [
+          {
+            "name": "mac",
+            "exec": "getmac.sh"
+          },
+          {
+            "name": "example",
+            "exec": "/bin/pwd"
+          }
+        ]
+      }
+    },
+
+    {
+      "name": "cmd",
+      "settings": {
+        "commands": [
+          {
+            "name": "test-one",
+            "exec": "/bin/ls ${dir}"
+          },
+
+          {
+            "name": "test-two",
+            "exec": "/bin/pwd"
+          }
+        ]
       }
     }
   ]
 }
-

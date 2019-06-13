@@ -1,5 +1,5 @@
 //
-// Copyright [2018] [Comcast NBCUniversal]
+// Copyright [2018] [Comcast, Corp]
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -421,7 +421,7 @@ startBeacon(std::string const& name, int deviceId)
   {
     char addr[18];
     ba2str(&deviceInfo.bdaddr, addr);
-    XLOG_INFO("BDADDR:%s", addr);
+    XLOG_INFO("bluetooh mac:%s", addr);
 
     for (int i = 0; i < 6; ++i)
       instanceId[i] = deviceInfo.bdaddr.b[i];
@@ -452,6 +452,8 @@ startBeacon(std::string const& name, int deviceId)
     instanceId[0]);
  
   hcitoolCmd(deviceInfo.dev_id, parseArgs(buff));
+
+  system("hcitool cmd 0x08 0x0006 A0 00 A0 00 00 00 00 00 00 00 00 00 00 07 00");
 
   #if 0
   std::string startUpCmd02(appSettings_get_ble_value("ble_init_cmd02"));
