@@ -45,12 +45,23 @@ struct DeviceInfoProvider
   std::function< std::string () > GetManufacturerName;
 };
 
+struct RdkDiagProvider
+{
+  int rdkDiagUuid;
+  std::function< std::string () > GetDeviceStatus;
+  std::function< std::string () > GetFirmwareDownloadStatus;
+  std::function< std::string () > GetWebPAStatus;
+  std::function< std::string () > GetWiFiRadio1Status;
+  std::function< std::string () > GetWiFiRadio2Status;
+  std::function< std::string () > GetRFStatus;
+};
+
 class RpcConnectedClient
 {
 public:
   RpcConnectedClient() { }
   virtual ~RpcConnectedClient() { }
-  virtual void init(DeviceInfoProvider const& deviceInfoProvider) = 0;
+  virtual void init(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider) = 0;
   virtual void enqueueForSend(char const* buff, int n) = 0;
   virtual void run() = 0;
   virtual void setDataHandler(RpcDataHandler const& handler) = 0;
@@ -109,7 +120,7 @@ public:
   virtual ~RpcListener() { }
   virtual void init(cJSON const* conf) = 0;
   virtual std::shared_ptr<RpcConnectedClient>
-    accept(DeviceInfoProvider const& deviceInfoProvider) = 0;
+    accept(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider) = 0;
 
 public:
   static std::shared_ptr<RpcListener> create();

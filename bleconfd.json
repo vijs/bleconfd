@@ -2,8 +2,13 @@
   "listener": {
     "name": "ble",
     "hci-device-id": 0,
-    "ble-name": "XPI-SETUP",
-    "ble-uuid": ""
+    "ble-device-name": "FIREBOLT",
+    "ble-uuid": "",
+    "beacon-config": {
+      "company-id": 1955,
+      "device-info-uuid": 6154,
+      "rdk-diag-uuid": 64953
+    }
   },
 
   "services": [
@@ -35,6 +40,11 @@
       "name": "cmd",
       "settings": {
         "commands": [
+          {
+            "name": "get-diag",
+            "exec": "dmesg |tail -10"
+          },
+
           {
             "name": "test-one",
             "exec": "/bin/ls ${dir}"

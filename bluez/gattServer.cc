@@ -58,6 +58,14 @@ namespace
   std::string const kUuidRpcInbox         {"510c87c8-eb90-11e8-b3dc-17292c2ecc2d"};
   std::string const kUuidRpcEPoll         {"5140f882-eb90-11e8-a835-13d2bd922d3f"};
 
+  uint16_t const kUuidRdkDiagService      {0xFDB9};
+  std::string const kUuidDeviceStatus     {"1f113f2c-cc01-4f03-9c5c-4b273ed631bb"};
+  std::string const kUuidFwDownloadStatus {"915f96a6-3788-4271-a7ea-6820e98896b8"};
+  std::string const kUuidWebPAStatus      {"9d5d3aae-51e3-4767-a055-59febd71de9d"};
+  std::string const kUuidWiFiRadio1Status {"59a99d5a-3d2f-4265-af13-316c7c76b1f0"};
+  std::string const kUuidWiFiRadio2Status {"9d6cf473-4fa6-4868-bf2b-c310f38df0c8"};
+  std::string const kUuidRFStatus         {"91b9497e-634c-408a-9f77-8375b1461b8b"};
+
   void DIS_writeCallback(gatt_db_attribute* UNUSED_PARAM(attr), int err, void* UNUSED_PARAM(argp))
   {
     if (err)
@@ -201,7 +209,7 @@ GattServer::~GattServer()
 }
 
 void
-GattServer::init(cJSON const* conf)
+GattServer::init(cJSON const* listenerConfig)
 {
   m_listen_fd = socket(PF_BLUETOOTH, SOCK_SEQPACKET, BTPROTO_L2CAP);
   if (m_listen_fd < 0)
@@ -230,13 +238,11 @@ GattServer::init(cJSON const* conf)
   if (ret < 0)
     throw_errno(errno, "failed to listen on bluetooth socket");
 
-  startBeacon(
-      JsonRpc::getString(conf, "ble-name", false, "XPI-SETUP"),
-      JsonRpc::getInt(conf, "hci-device-id", false, 0));
+  startBeacon(listenerConfig);
 }
 
 std::shared_ptr<RpcConnectedClient>
-GattServer::accept(DeviceInfoProvider const& deviceInfoProvider)
+GattServer::accept(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider)
 {
   mainloop_init();
 
@@ -255,12 +261,12 @@ GattServer::accept(DeviceInfoProvider const& deviceInfoProvider)
   XLOG_INFO("accepted remote connection from:%s", remote_address);
 
   auto clnt = std::shared_ptr<GattClient>(new GattClient(soc));
-  clnt->init(deviceInfoProvider);
+  clnt->init(deviceInfoProvider, rdkDiagProvider);
   return clnt;
 }
 
 void
-GattClient::init(DeviceInfoProvider const& deviceInfoProvider)
+GattClient::init(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider)
 {
   m_att = bt_att_new(m_fd, 0);
   if (!m_att)
@@ -289,16 +295,17 @@ GattClient::init(DeviceInfoProvider const& deviceInfoProvider)
   }
 
   m_timeout_id = mainloop_add_timeout(1000, &GattClient_onTimeout, this, nullptr);
-  buildGattDatabase(deviceInfoProvider);
+  buildGattDatabase(deviceInfoProvider, rdkDiagProvider);
 }
 
 void
-GattClient::buildGattDatabase(DeviceInfoProvider const& deviceInfoProvider)
+GattClient::buildGattDatabase(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider)
 {
   buildGapService();
   buildGattService();
   buildDeviceInfoService(deviceInfoProvider);
-  buildJsonRpcService();
+  buildRdkDiagService(rdkDiagProvider);
+  //buildJsonRpcService();
 }
 
 void
@@ -621,7 +628,34 @@ GattClient::onServiceChangedWrite(gatt_db_attribute* attr, uint32_t id, uint16_t
 }
 
 void
-GattClient::addDeviceInfoCharacteristic(
+GattClient::addGattCharacteristic(
+  gatt_db_attribute* service,
+  bt_uuid_t          uuid,
+  std::string const& value)
+{
+  char buff[128];
+
+  gatt_db_attribute* attr = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ,
+    BT_GATT_CHRC_PROP_READ, nullptr, nullptr, this);
+
+  bt_uuid_to_string(&uuid, buff, sizeof(buff));
+  if (!attr)
+  {
+    XLOG_CRITICAL("failed to create GATT characteristic %s", buff);
+    return;
+  }
+
+  uint8_t const* p = reinterpret_cast<uint8_t const *>(value.c_str());
+
+  XLOG_INFO("setting GATT attr:%s to %s", buff, value.c_str());
+
+  // I'm not sure whether i like this or just having callbacks setup for reads
+  gatt_db_attribute_write(attr, 0, p, value.length(), BT_ATT_OP_WRITE_REQ, nullptr,
+      &DIS_writeCallback, nullptr);
+}
+
+void
+GattClient::addGattCharacteristic(
   gatt_db_attribute* service,
   uint16_t           id,
   std::string const& value)
@@ -629,22 +663,19 @@ GattClient::addDeviceInfoCharacteristic(
   bt_uuid_t uuid;
   bt_uuid16_create(&uuid, id);
 
-  gatt_db_attribute* attr = gatt_db_service_add_characteristic(service, &uuid, BT_ATT_PERM_READ,
-    BT_GATT_CHRC_PROP_READ, nullptr, nullptr, this);
+  addGattCharacteristic(service, uuid, value);
+}
 
-  if (!attr)
-  {
-    XLOG_CRITICAL("failed to create DIS characteristic %u", id);
-    return;
-  }
+void
+GattClient::addGattCharacteristic(
+  gatt_db_attribute* service,
+  std::string const& id,
+  std::string const& value)
+{
+  bt_uuid_t uuid;
+  bt_string_to_uuid(&uuid, id.c_str());
 
-  uint8_t const* p = reinterpret_cast<uint8_t const *>(value.c_str());
-
-  XLOG_INFO("setting DIS attr:%d to %s", id, value.c_str());
-
-  // I'm not sure whether i like this or just having callbacks setup for reads
-  gatt_db_attribute_write(attr, 0, p, value.length(), BT_ATT_OP_WRITE_REQ, nullptr,
-      &DIS_writeCallback, nullptr);
+  addGattCharacteristic(service, uuid, value);
 }
 
 void
@@ -653,18 +684,35 @@ GattClient::buildDeviceInfoService(DeviceInfoProvider const& deviceInfoProvider)
   bt_uuid_t uuid;
   bt_uuid16_create(&uuid, kUuidDeviceInfoService);
 
-  // TODO: I don't know what the end value is for. The last call here to add
-  // the manufacturer name was failing, but when I upp'ed it from 14 to 30
-  // the error went away. Not sure what's going on?
   gatt_db_attribute* service = gatt_db_add_service(m_db, &uuid, true, 30);
 
-  addDeviceInfoCharacteristic(service, kUuidSystemId, deviceInfoProvider.GetSystemId());
-  addDeviceInfoCharacteristic(service, kUuidModelNumber, deviceInfoProvider.GetModelNumber());
-  addDeviceInfoCharacteristic(service, kUuidSerialNumber, deviceInfoProvider.GetSerialNumber());
-  addDeviceInfoCharacteristic(service, kUuidFirmwareRevision, deviceInfoProvider.GetFirmwareRevision());
-  addDeviceInfoCharacteristic(service, kUuidHardwareRevision, deviceInfoProvider.GetHardwareRevision());
-  addDeviceInfoCharacteristic(service, kUuidSoftwareRevision, deviceInfoProvider.GetSoftwareRevision());
-  addDeviceInfoCharacteristic(service, kUuidManufacturerName, deviceInfoProvider.GetManufacturerName());
+  XLOG_INFO("\nBuilding DeviceInfo Service");
+  addGattCharacteristic(service, kUuidSystemId, deviceInfoProvider.GetSystemId());
+  addGattCharacteristic(service, kUuidModelNumber, deviceInfoProvider.GetModelNumber());
+  addGattCharacteristic(service, kUuidSerialNumber, deviceInfoProvider.GetSerialNumber());
+  addGattCharacteristic(service, kUuidFirmwareRevision, deviceInfoProvider.GetFirmwareRevision());
+  addGattCharacteristic(service, kUuidHardwareRevision, deviceInfoProvider.GetHardwareRevision());
+  addGattCharacteristic(service, kUuidSoftwareRevision, deviceInfoProvider.GetSoftwareRevision());
+  addGattCharacteristic(service, kUuidManufacturerName, deviceInfoProvider.GetManufacturerName());
+
+  gatt_db_service_set_active(service, true);
+}
+
+void
+GattClient::buildRdkDiagService(RdkDiagProvider const& rdkDiagProvider)
+{
+  bt_uuid_t uuid;
+  bt_uuid16_create(&uuid, kUuidRdkDiagService);
+
+  gatt_db_attribute* service = gatt_db_add_service(m_db, &uuid, true, 31);
+
+  XLOG_INFO("\nBuilding RdkDiag Service");
+  addGattCharacteristic(service, kUuidDeviceStatus, rdkDiagProvider.GetDeviceStatus());
+  addGattCharacteristic(service, kUuidFwDownloadStatus, rdkDiagProvider.GetFirmwareDownloadStatus());
+  addGattCharacteristic(service, kUuidWebPAStatus, rdkDiagProvider.GetWebPAStatus());
+  addGattCharacteristic(service, kUuidWiFiRadio1Status, rdkDiagProvider.GetWiFiRadio1Status());
+  addGattCharacteristic(service, kUuidWiFiRadio2Status, rdkDiagProvider.GetWiFiRadio2Status());
+  addGattCharacteristic(service, kUuidRFStatus, rdkDiagProvider.GetRFStatus());
 
   gatt_db_service_set_active(service, true);
 }

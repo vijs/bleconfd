@@ -21,9 +21,8 @@ struct cJSON;
 
 /**
  * start up beacon
- * @param s the expected device name
- * @param isNeedUpdateName is need update the device name? it need restart BLE service, will drop all connection
+ * @param listenerConfig listener/beacon configuration
  */
-void startBeacon(std::string const& name, int deviceId);
+void startBeacon(cJSON const* listenerConfig);
 
 #endif

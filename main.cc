@@ -42,7 +42,12 @@ std::string DIS_getManufacturerName();
 std::string DIS_getContentFromFile(char const* fname);
 std::string DIS_getVariable(char const* fname, char const* field);
 std::vector<std::string> DIS_getDeviceInfoFromDB(std::string const& rCode);
-
+std::string RDS_getDeviceStatus();
+std::string RDS_getFirmwareDownloadStatus();
+std::string RDS_getWebPAStatus();
+std::string RDS_getWiFiRadio1Status();
+std::string RDS_getWiFiRadio2Status();
+std::string RDS_getRFStatus();
 
 class SignalingConnectedClient : public RpcConnectedClient
 {
@@ -51,7 +56,7 @@ public:
     : RpcConnectedClient()
     , m_have_response(false) { }
   virtual ~SignalingConnectedClient() { }
-  virtual void init(DeviceInfoProvider const& UNUSED_PARAM(deviceInfoProvider)) override { }
+  virtual void init(DeviceInfoProvider const& UNUSED_PARAM(deviceInfoProvider), RdkDiagProvider const& UNUSED_PARAM(rdkDiagProvider)) override { }
   virtual void enqueueForSend(char const* UNUSED_PARAM(buff), int UNUSED_PARAM(n)) override
   {
     {
@@ -159,6 +164,15 @@ int main(int argc, char* argv[])
 
     cJSON const* listenerConfig = cJSON_GetObjectItem(config, "listener");
 
+    RdkDiagProvider rdkDiagProvider;
+    rdkDiagProvider.rdkDiagUuid = JsonRpc::getInt(listenerConfig, "/beacon-config/rdk-diag-uuid", false, 0x2000);
+    rdkDiagProvider.GetDeviceStatus = &RDS_getDeviceStatus;
+    rdkDiagProvider.GetFirmwareDownloadStatus = &RDS_getFirmwareDownloadStatus;
+    rdkDiagProvider.GetWebPAStatus = &RDS_getWebPAStatus;
+    rdkDiagProvider.GetWiFiRadio1Status = &RDS_getWiFiRadio1Status;
+    rdkDiagProvider.GetWiFiRadio2Status = &RDS_getWiFiRadio2Status;
+    rdkDiagProvider.GetRFStatus = &RDS_getRFStatus;
+
     while (true)
     {
       try
@@ -167,7 +181,7 @@ int main(int argc, char* argv[])
         listener->init(listenerConfig);
 
         // blocks here until remote client makes BT connection
-        std::shared_ptr<RpcConnectedClient> client = listener->accept(deviceInfoProvider);
+        std::shared_ptr<RpcConnectedClient> client = listener->accept(deviceInfoProvider, rdkDiagProvider);
         client->setDataHandler(std::bind(&RpcServer::onIncomingMessage,
               &server, std::placeholders::_1, std::placeholders::_2));
         server.setClient(client);
@@ -294,4 +308,41 @@ DIS_getDeviceInfoFromDB(std::string const& rCode)
   }
 
   return std::vector<std::string>();
+}
+
+// TODO: Implement following wrappers
+std::string
+RDS_getDeviceStatus()
+{
+  return std::string("READY");
+}
+
+std::string
+RDS_getFirmwareDownloadStatus()
+{
+  return std::string("COMPLETED");
+}
+
+std::string
+RDS_getWebPAStatus()
+{
+  return std::string("UP");
+}
+
+std::string
+RDS_getWiFiRadio1Status()
+{
+  return std::string("UP");
+}
+
+std::string
+RDS_getWiFiRadio2Status()
+{
+  return std::string("UP");
+}
+
+std::string
+RDS_getRFStatus()
+{
+  return std::string("Not Connected");
 }

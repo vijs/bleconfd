@@ -32,6 +32,7 @@
 
 #include "../rpclogger.h"
 #include "../util.h"
+#include "../jsonrpc.h"
 
 #include "beacon.h"
 
@@ -386,12 +387,19 @@ parseArgs(string str)
 
 /**
  * start up beacon
- * @param s the expected device name
+ * @param listenerConfig listener/beacon configuration
  */
 void
-startBeacon(std::string const& name, int deviceId)
+startBeacon(cJSON const* listenerConfig)
 {
-  XLOG_INFO("starting beacon %s on hci%d", name.c_str(), deviceId);
+  char const* name = JsonRpc::getString(listenerConfig, "ble-device-name", false, "XPI-SETUP");
+  int deviceId = JsonRpc::getInt(listenerConfig, "hci-device-id", false, 0);
+  int companyId = JsonRpc::getInt(listenerConfig, "/beacon-config/company-id", false, 0xFFFF);
+  int deviceInfoUUID = JsonRpc::getInt(listenerConfig, "/beacon-config/device-info-uuid", false, 0x1000);
+  int rdkDiagUUID = JsonRpc::getInt(listenerConfig, "/beacon-config/rdk-diag-uuid", false, 0x2000);
+
+  XLOG_INFO("starting beacon %s on hci%d", name, deviceId);
+  XLOG_INFO("companyId: 0x%X, deviceInfoUUID: 0x%X, rdkDiagUUID: 0x%X", companyId, deviceInfoUUID, rdkDiagUUID);
 
   // updateDeviceName(s.c_str());
   struct hci_dev_info deviceInfo;
@@ -442,6 +450,7 @@ startBeacon(std::string const& name, int deviceId)
   system("hciconfig hci0 class 3a0430");
 
   char buff[128];
+#if EDDYSTONE_BEACON
   snprintf(buff, sizeof(buff), "0x08 0x0008 "
     "1f 02 01 06 03 03 aa fe 17 16 aa fe 00 e7 36 c8 80 7b f4 60 cb 41 d1 45 %02x %02x %02x %02x %02x %02x 00 00",
     instanceId[5],
@@ -450,6 +459,20 @@ startBeacon(std::string const& name, int deviceId)
     instanceId[2],
     instanceId[1],
     instanceId[0]);
+#else // Comcast Beacon
+  snprintf(buff, sizeof(buff), "0x08 0x0008 "
+    "1f 02 01 06 05 03 %02x %02x %02x %02x 09 ff %02x %02x %02x %02x %02x %02x %02x %02x",
+    deviceInfoUUID & 0xFF, (deviceInfoUUID >> 8) & 0xFF,
+    rdkDiagUUID & 0xFF, (rdkDiagUUID >> 8) & 0xFF,
+    companyId & 0xFF, (companyId >> 8) & 0xFF,
+    instanceId[5],
+    instanceId[4],
+    instanceId[3],
+    instanceId[2],
+    instanceId[1],
+    instanceId[0]);
+
+#endif
  
   hcitoolCmd(deviceInfo.dev_id, parseArgs(buff));
 
@@ -461,5 +484,5 @@ startBeacon(std::string const& name, int deviceId)
   #endif
 
   cmdLeadv(deviceInfo.dev_id);
-  cmdName(deviceInfo.dev_id, name.c_str());
+  cmdName(deviceInfo.dev_id, name);
 }

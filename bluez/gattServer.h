@@ -45,7 +45,7 @@ public:
   GattClient(int fd);
   virtual ~GattClient();
 
-  virtual void init(DeviceInfoProvider const& provider) override;
+  virtual void init(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider) override;
   virtual void enqueueForSend(char const* buff, int n) override; 
   virtual void run() override;
   virtual void setDataHandler(RpcDataHandler const& handler) override
@@ -83,13 +83,15 @@ public:
     uint16_t offset, uint8_t opcode, bt_att* att);
 
 private:
-  void buildGattDatabase(DeviceInfoProvider const& deviceInfoProvider);
+  void buildGattDatabase(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider);
 
   void buildGapService();
   void buildGattService();
+  void addGattCharacteristic(gatt_db_attribute* service, bt_uuid_t uuid, std::string const& value);
+  void addGattCharacteristic(gatt_db_attribute* service, uint16_t id, std::string const& value);
+  void addGattCharacteristic(gatt_db_attribute* service, std::string const& id, std::string const& value);
   void buildDeviceInfoService(DeviceInfoProvider const& deviceInfoProvider);
-  void addDeviceInfoCharacteristic(gatt_db_attribute* service, uint16_t id,
-    std::string const& value);
+  void buildRdkDiagService(RdkDiagProvider const& rdkDiagProvider);
   void buildJsonRpcService();
 
 private:
@@ -117,7 +119,7 @@ public:
 
   virtual void init(cJSON const* conf) override;
   virtual std::shared_ptr<RpcConnectedClient>
-    accept(DeviceInfoProvider const& deviceInfoProvider) override;
+    accept(DeviceInfoProvider const& deviceInfoProvider, RdkDiagProvider const& rdkDiagProvider) override;
 
 private:
   int             m_listen_fd;
